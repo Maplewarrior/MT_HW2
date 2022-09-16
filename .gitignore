@@ -127,3 +127,7 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+Preprocess_and_build.py
+test.py
+scratch.py
