@@ -34,13 +34,13 @@ def setup_seed(seed):
     torch.cuda.manual_seed_all(seed)           
     torch.backends.cudnn.deterministic = True
 
-def train_model(model_input, epochs, verbose=True):
+def train_model(model, data, epochs, verbose=True):
     model.train()
     start = time.time()
     total_loss = 0
     
-    source_all = model_input['input_ids']
-    target_all = model_input['target']
+    source_all = data['input_ids']
+    target_all = data['target']
     
     # loop over epochs
     for epoch in range(epochs):
@@ -49,8 +49,8 @@ def train_model(model_input, epochs, verbose=True):
         for i in range(len(source_all)):
             
             # unsqueeze to avoid dim mismatch between embedder and pe
-            src = torch.tensor(source_all[i].unsqueeze(1)) 
-            trg = torch.tensor(target_all[i].unsqueeze(1))
+            src = source_all[i].unsqueeze(0)
+            trg = target_all[i].unsqueeze(0)
             size = len(trg)
             print("sizeeee", size)
             

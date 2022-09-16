@@ -1,6 +1,5 @@
 import Embedder
 import PositionalEncoder
-import EncoderLayer
 import MultiHeadAttention
 import FeedForwardNetwork
 from util import cloneLayers, setup_seed
