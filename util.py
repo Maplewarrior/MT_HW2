@@ -9,11 +9,12 @@ import random
 import copy
 import time
 
-tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=d_model)
+tokenizer = AutoTokenizer.from_pretrained('t5_small', model_max_length=512)
 
+def cloneLayers(module, n_layers):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(n_layers)])
 
 def preprocess_data(df, s_key, t_key, max_length):
-    setup_seed(42)
     s = [sentence for sentence in df[s_key]]
     t = [sentence for sentence in df[t_key]]
     

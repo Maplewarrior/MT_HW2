@@ -13,19 +13,17 @@ import pandas as pd
 import random
 
 setup_seed(42)
-
 torch.manual_seed(0)
 np.random.seed(0)
 random.seed(0)
+
 ### Load data ###
 data_en = open("data/hansards.e", encoding='utf-8').read().split('\n')
 data_fr = open("data/hansards.f", encoding='utf-8').read().split('\n')
 
 
 raw_data = {'en': [line for line in data_en], 'fr': [line for line in data_fr]}
-
 df = pd.DataFrame(raw_data, columns = ['en', 'fr'])
-
 df_small = df[['en', 'fr']][:100]
 
 ### Define arguments ### (same as in "Attention is all you need")
@@ -44,33 +42,16 @@ model_checkpoint = 't5-small'
 # Function for mapping data from strings to tokens
 # s_key = source key, t_key = target_key
 
-
 ipt = preprocess_data(df_small, 'en', 'fr', max_length=36)
 
-src_vocab_size = [word for sentence in ipt['input_ids'] for word in sentence]
-src_vocab_size = len(np.unique(src_vocab_size))
-
-trg_vocab_size = [word for sentence in ipt['target'] for word in sentence]
-trg_vocab_size = len(np.unique(trg_vocab_size))
+src_vocab_size = len(np.unique([word for sentence in ipt['input_ids'] for word in sentence]))
+trg_vocab_size = len(np.unique([word for sentence in ipt['target'] for word in sentence]))
 
 # flat_list = [item for sublist in l for item in sublist]
-
-print((ipt['input_ids'].unsqueeze(1).shape))
-print((ipt['target'].unsqueeze(1).shape))
-
-
 pe = PositionalEncoder(d_model, max_seq_len=d_model)
 MHA = MultiHeadAttention(n_heads, d_model, d_k)
 FFN = FeedForwardNetwork(d_model, d_ff)
-
-encoderLayer = EncoderLayer(n_heads, d_model, d_ff)
-# encoderLayer2 = EncoderLayer1(n_heads, d_model, d_ff)
-
-decoderLayer1 = DecoderLayer(n_heads, d_model, d_ff, d_k)
-
 encoder = Encoder(vocab_size, d_model, n_layers, n_heads)
-setup_seed(42)
-
 
 ### define model and initialize params ###
 model = Transformer(vocab_size, vocab_size, d_model, n_layers, n_heads)
@@ -80,50 +61,15 @@ for p in model.parameters():
 
 ### define optimizer ###
 optim = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
-
-
 epochs = 5
 batch_size = 10
 
-# src = ipt['input_ids']
-# trg = ipt['target']
-
-# def batch(ipt, n=5):
-#     l = len(ipt)
-#     for ndx in range(0, l, n):
-#         yield ipt[ndx:min(ndx + n, l)]
-
-
-# def get_mask(trg, trg_mask):
-#     return torch.masked_select(trg, trg_mask)
-
-# target_seq = trg[0]
-# size = len(target_seq)
-
-# nopeak_mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
-# nopeak_mask = torch.autograd.Variable(torch.from_numpy(nopeak_mask) == 0)
-
-# for epoch in range(epochs):
-    
-T = Transformer(vocab_size, vocab_size, d_model, n_layers, n_heads)
-
-preds = T.forward(ipt['input_ids'][0], ipt['target'][0], None, None)
-
-
-
+preds = model.forward(ipt['input_ids'][0], ipt['target'][0], None, None)
 
 train_model(ipt, epochs)             
 EMB = Embedder(vocab_size, d_model)
 e1 = EMB(ipt['input_ids'][0].unsqueeze(1))
 f1 = EMB(ipt['target'][0].unsqueeze(1))
-
-
-
-print(e1.size())
-print(f1.size())
-
-
-print(ipt['target'][1]==0)
 
 # 
 # p_e1 = pe(e1)
