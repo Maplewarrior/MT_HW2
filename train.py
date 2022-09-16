@@ -6,9 +6,6 @@ import torch
 from tqdm import tqdm
 import torch.nn as nn
 import torch.optim as optim
-from src.models import UNET
-from .utils import ( save_checkpoint, check_accuracy )
-from .utils import DiceLoss2D
 import os
 
 def train_fn(train_loader, val_loader, model, optimizer, loss_fn, scheduler, num_epochs, checkpoint_name: str):
