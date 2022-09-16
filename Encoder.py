@@ -32,7 +32,6 @@ class Encoder(nn.Module):
 
 class EncoderLayer(nn.Module):
     def __init__(self, n_heads, d_model, d_ff, dropout=.1):
-        setup_seed(42)
         super().__init__()
         self.MHA = MultiHeadAttention(n_heads, d_model, d_k, dropout)
         self.FFN = FeedForwardNetwork(d_model, d_ff, dropout)
@@ -43,7 +42,6 @@ class EncoderLayer(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
     
     def forward(self, x, mask=None):
-        setup_seed(42)
         x2 = self.dropout1(self.MHA(x, x, x, mask))
         x = self.norm1(x) + self.norm1(x2)
         

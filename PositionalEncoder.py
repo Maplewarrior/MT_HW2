@@ -1,7 +1,10 @@
+import torch
+import torch.nn as nn
+import numpy as np
+
 class PositionalEncoder(nn.Module):
     def __init__(self, d_model, max_seq_len=1024):
         super().__init__()
-        setup_seed(42)
         self.d_model = d_model
         
         # Allocate memory to 
@@ -18,15 +21,12 @@ class PositionalEncoder(nn.Module):
         self.register_buffer('pe',pe)
         
     def forward(self,x):
-        setup_seed(42)
         # Make embeddings larger
         x = x*np.sqrt(self.d_model)
         # Get sequence length
         seq_len = x.size(1)
-        print("seq_len:", seq_len)
         v = torch.autograd.Variable(self.pe[:,:seq_len], 
         requires_grad=False)
-        print("pe_shape:", v.size())
         x = x + torch.autograd.Variable(self.pe[:,:seq_len], 
         requires_grad=False)
         return x

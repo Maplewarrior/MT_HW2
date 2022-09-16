@@ -26,7 +26,6 @@ class Decoder(nn.Module):
 
 class DecoderLayer(nn.Module):
     def __init__(self, n_heads, d_model, d_ff, d_k, dropout=.1):
-        setup_seed(42)
         super().__init__()
         self.d_model = d_model
         self.n_heads = n_heads
@@ -47,11 +46,8 @@ class DecoderLayer(nn.Module):
         # self.linear = nn.Linear()
         
     def forward(self, x, e_out, target_mask, source_mask):
-        setup_seed(42)
         # part 1
-        print("before norm:", x.size())
         x2 = self.norm1(x) # Norm
-        print("after norm:", x2.size())
         x = self.dropout1(self.MHA.forward(x2, x2, x2, target_mask)) # Masked MHA, target
         x = x2 + self.norm1(x) # Add & Norm
         

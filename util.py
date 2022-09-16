@@ -53,7 +53,6 @@ def train_model(model, data, epochs, verbose=True):
             src = source_all[i].unsqueeze(0)
             trg = target_all[i].unsqueeze(0)
             size = len(trg)
-            print("sizeeee", size)
             
             source_pad = source_all[i] == 0
             
