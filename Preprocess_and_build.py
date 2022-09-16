@@ -40,60 +40,6 @@ df_small = df[['en', 'fr']][:100]
 
 #%%
 
-### Define arguments ### (same as in "Attention is all you need")
-d_model = 512 # Dimension of embeddings
-d_k = 64 # dimension of keys (d_model / n_heads)
-d_ff = 2048
-vocab_size = len(df) # Number of (unique) words in dataset
-n_heads = 8 # Number of heads for MHA
-n_layers = 6 # Number of model layers
-train_iter = 5
-model_checkpoint = 't5-small'
-
-
-# Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=d_model)
-
-
-
-# Function for mapping data from strings to tokens
-# s_key = source key, t_key = target_key
-def preprocess_data(df, s_key, t_key, max_length):
-    setup_seed(42)
-    s = [sentence for sentence in df[s_key]]
-    t = [sentence for sentence in df[t_key]]
-    
-    model_input = tokenizer(s, max_length=max_length, truncation=True, padding=True, return_tensors='pt') 
-    
-    with tokenizer.as_target_tokenizer():
-        target_tokens = tokenizer(t, truncation=True, padding=True, max_length=max_length, return_tensors='pt') 
-        
-    model_input['target'] = target_tokens['input_ids']
-    
-    return model_input
-
-ipt = preprocess_data(df_small, 'en', 'fr', max_length=36)
-
-
-
-src_vocab_size = [word for sentence in ipt['input_ids'] for word in sentence]
-src_vocab_size = len(np.unique(src_vocab_size))
-
-trg_vocab_size = [word for sentence in ipt['target'] for word in sentence]
-trg_vocab_size = len(np.unique(trg_vocab_size))
-
-# flat_list = [item for sublist in l for item in sublist]
-
-print((ipt['input_ids'].unsqueeze(1).shape))
-print((ipt['target'].unsqueeze(1).shape))
-
-
-
-#%%
-
-
-#%%
-
 
 class Embedder(nn.Module):
     def __init__(self, vocab_size, d_model):
@@ -202,7 +148,7 @@ class MultiHeadAttention(nn.Module):
         Q, K, V = [t.transpose(1,2) for t in (Q, K, V)] # reshape to [bs x n_heads x seq_len x d_k]
         
         # Compute Attention
-        vals = Attention(Q, K, V, d_k, mask, self.dropout)
+        vals = Attention(Q, K, V, self.d_k, mask, self.dropout)
         
         # Reshape to [bs x seq_len x d_model]
         vals = vals.transpose(1,2).contiguous().view(vals.size(0), -1, self.d_model)
@@ -225,7 +171,7 @@ class FeedForwardNetwork(nn.Module):
 
         
 class EncoderLayer(nn.Module):
-    def __init__(self, n_heads, d_model, d_ff, dropout=.1):
+    def __init__(self, n_heads, d_model, d_ff, d_k, dropout=.1):
         setup_seed(42)
         super().__init__()
         self.MHA = MultiHeadAttention(n_heads, d_model, d_k, dropout)
@@ -238,6 +184,9 @@ class EncoderLayer(nn.Module):
     
     def forward(self, x, mask=None):
         setup_seed(42)
+        
+        # See "Attention is all you need" to follow code structure
+        
         x2 = self.dropout1(self.MHA(x, x, x, mask))
         x = self.norm1(x) + self.norm1(x2)
         
@@ -281,10 +230,11 @@ class DecoderLayer(nn.Module):
         
     def forward(self, x, e_out, target_mask, source_mask):
         setup_seed(42)
+        
+        # See "Attention is all you need" to follow code structure
+        
         # part 1
-        print("before norm:", x.size())
         x2 = self.norm1(x) # Norm
-        print("after norm:", x2.size())
         x = self.dropout1(self.MHA.forward(x2, x2, x2, target_mask)) # Masked MHA, target
         x = x2 + self.norm1(x) # Add & Norm
         
@@ -309,7 +259,7 @@ def cloneLayers(module, n_layers):
     return nn.ModuleList([copy.deepcopy(module) for i in range(n_layers)])
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_size, d_model, n_layers, n_heads, dropout=.1):
+    def __init__(self, vocab_size, d_model, d_ff, n_layers, n_heads, dropout=.1):
         super().__init__()
         self.n_layers = n_layers
         self.embedder = Embedder(vocab_size, d_model)
@@ -334,7 +284,7 @@ class Encoder(nn.Module):
         return self.norm(x)
 
 class Decoder(nn.Module):
-    def __init__(self, vocab_size, d_model, n_layers, n_heads, dropout=.1):
+    def __init__(self, vocab_size, d_model, d_ff, d_k, n_layers, n_heads, dropout=.1):
         super().__init__()
         self.n_layers = n_layers
         self.embedder = Embedder(vocab_size, d_model)
@@ -356,8 +306,8 @@ class Decoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, source_vocab_size, target_vocab_size, d_model, n_layers, n_heads):
         super().__init__()
-        self.e = Encoder(source_vocab_size, d_model, n_layers, n_heads)
-        self.d = Decoder(target_vocab_size, d_model, n_layers, n_heads)
+        self.e = Encoder(source_vocab_size, d_model,d_ff, n_layers, n_heads)
+        self.d = Decoder(target_vocab_size, d_model,d_ff, d_k, n_layers, n_heads)
         
         self.linear_f = nn.Linear(d_model, target_vocab_size)
         
@@ -369,16 +319,176 @@ class Transformer(nn.Module):
         return out
         
 
+
+#%%
+### Define arguments ### (same as in "Attention is all you need")
+d_model = 512 # Dimension of embeddings
+d_k = 64 # dimension of keys (d_model / n_heads)
+d_ff = 2048
+vocab_size = len(df) # Number of (unique) words in dataset
+n_heads = 8 # Number of heads for MHA
+n_layers = 6 # Number of model layers
+train_iter = 5
+model_checkpoint = 't5-small'
+
+
+# Tokenizer
+tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=d_model)
+
+
+
+# Function for mapping data from strings to tokens
+# s_key = source key, t_key = target_key
+def preprocess_data(df, s_key, t_key, max_length):
+    setup_seed(42)
+    s = [sentence for sentence in df[s_key]]
+    t = [sentence for sentence in df[t_key]]
+    
+    model_input = tokenizer(s, max_length=max_length, truncation=True, padding=True, return_tensors='pt') 
+    
+    with tokenizer.as_target_tokenizer():
+        target_tokens = tokenizer(t, truncation=True, padding=True, max_length=max_length, return_tensors='pt') 
+        
+    model_input['target'] = target_tokens['input_ids']
+    
+    return model_input
+
+ipt = preprocess_data(df_small, 'en', 'fr', max_length=36)
+
+
+
+src_vocab_size = [word for sentence in ipt['input_ids'] for word in sentence]
+src_vocab_size = len(np.unique(src_vocab_size))
+
+trg_vocab_size = [word for sentence in ipt['target'] for word in sentence]
+trg_vocab_size = len(np.unique(trg_vocab_size))
+
+# flat_list = [item for sublist in l for item in sublist]
+
+
+
+#%%
+def generate_square_subsequent_mask(size):
+    mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
+    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+    return mask
+
+
+source_all = ipt['input_ids']
+target_all = ipt['target']
+
+
+src = source_all[0].unsqueeze(0)
+
+trg = target_all[0].unsqueeze(0)
+# print(src.size())
+#%%
+
+EMB = Embedder(vocab_size, d_model)
 pe = PositionalEncoder(d_model, max_seq_len=d_model)
 MHA = MultiHeadAttention(n_heads, d_model, d_k)
 FFN = FeedForwardNetwork(d_model, d_ff)
 
-encoderLayer = EncoderLayer(n_heads, d_model, d_ff)
+encoderLayer = EncoderLayer(n_heads, d_model, d_ff, d_k)
 # encoderLayer2 = EncoderLayer1(n_heads, d_model, d_ff)
 
 decoderLayer1 = DecoderLayer(n_heads, d_model, d_ff, d_k)
 
-encoder = Encoder(vocab_size, d_model, n_layers, n_heads)
+encoder = Encoder(vocab_size, d_model,d_ff, n_layers, n_heads)
+
+setup_seed(42)
+
+
+
+
+#%%
+
+sent1 = df_small['en'][0]
+print(sent1)
+
+e1 = ipt['input_ids'][0].unsqueeze(0)
+f1 = ipt['target'][0].unsqueeze(0)
+print(e1)
+print("before embed", e1.size())
+e1 = EMB.forward(e1)
+f1 = EMB.forward(f1)
+print("after embed", e1.size())
+
+e1 = pe.forward(e1)
+f1 = pe.forward(f1)
+print("positional encode \n", e1.size())
+
+
+Q, K, V = e1, e1, e1
+
+print("performing MHA on source")
+out = MHA.forward(Q, K, V)
+print("out shape:", out.size())
+
+
+out = FFN.forward(out)
+print("FFN:\n", out.size())
+out_e1 = encoderLayer(out)
+
+print("encoderLayer out:\n",out_e1.size())
+
+
+
+# out_d1 = decoderLayer1.forward(f1, out_e1, None, None)
+
+
+
+
+
+
+#%%
+print("method 1:")
+print((ipt['input_ids'].unsqueeze(1).shape))
+print((ipt['target'].unsqueeze(1).shape))
+
+
+print(ipt['input_ids'].unsqueeze(1)[0].shape)
+print("method2:")
+
+
+# print("##### Example shown here #####")
+EMB = Embedder(vocab_size, d_model)
+pe = PositionalEncoder(d_model, max_seq_len=36)
+
+e1 = df_small['en'][0]
+f1 = df_small['fr'][0]
+
+
+e1 = tokenizer(e1, truncation=True, padding=True, return_tensors='pt')
+f1 = tokenizer(f1, truncation=True, padding=True, return_tensors='pt')
+
+print("before embed:\n", e1['input_ids'].shape)
+
+e1 = EMB.forward(e1['input_ids'])
+print("after embed:\n", e1.size())
+f1 = EMB.forward(f1['input_ids'])
+
+
+print(f1.size())
+
+p_e1 = pe(e1)
+
+
+
+
+
+
+pe = PositionalEncoder(d_model, max_seq_len=d_model)
+MHA = MultiHeadAttention(n_heads, d_model, d_k)
+FFN = FeedForwardNetwork(d_model, d_ff)
+
+encoderLayer = EncoderLayer(n_heads, d_model, d_ff, d_k)
+# encoderLayer2 = EncoderLayer1(n_heads, d_model, d_ff)
+
+decoderLayer1 = DecoderLayer(n_heads, d_model, d_ff, d_k)
+
+encoder = Encoder(vocab_size, d_model,d_ff, n_layers, n_heads)
+
 setup_seed(42)
 
 
@@ -404,8 +514,8 @@ batch_size = 10
 #         yield ipt[ndx:min(ndx + n, l)]
 
 
-# def get_mask(trg, trg_mask):
-#     return torch.masked_select(trg, trg_mask)
+def get_mask(trg, trg_mask):
+    return torch.masked_select(trg, trg_mask)
 
 # target_seq = trg[0]
 # size = len(target_seq)
