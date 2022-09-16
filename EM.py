@@ -8,7 +8,7 @@ optparser.add_option("-e", "--english", dest="english", default="e", help="Suffi
 optparser.add_option("-f", "--french", dest="french", default="f", help="Suffix of French filename (default=f)")
 optparser.add_option("-t", "--threshold", dest="threshold", default=0.5, type="float", help="Threshold for aligning with Dice's coefficient (default=0.5)")
 optparser.add_option("-n", "--num_sentences", dest="num_sents", default=1000, type="int", help="Number of sentences to use for training and alignment")
-optparser.add_option("-i", "--iterations", dest="n_iter", default = 5, type="int", help="Number of iterations to run algorithm")
+optparser.add_option("-i", "--iterations", dest="n_iter", default = 50, type="int", help="Number of iterations to run algorithm")
 (opts, _) = optparser.parse_args()
 f_data = "%s.%s" % (opts.train, opts.french)
 e_data = "%s.%s" % (opts.train, opts.english)
@@ -82,7 +82,5 @@ for iter, (f, e) in enumerate(bitext):
         sys.stdout.write(str(best_align[0]) + "-" + str(best_align[1]) + " ")
         alignments_dict[(f_i,e_star)] = tuple(best_align)
     sys.stdout.write("\n")
-
-
 
 
