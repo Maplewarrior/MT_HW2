@@ -1,10 +1,24 @@
-from util import setup_seed, preprocess_data
-import torch
 import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from transformers import AutoTokenizer
+# import pytorch_forecasting.utils.create_mask as create_mask
 import random
-import Transformer
+import copy
+import time
 
 
+def setup_seed(seed):
+    random.seed(seed)                          
+    np.random.seed(seed)                       
+    torch.manual_seed(seed)                    
+    torch.cuda.manual_seed(seed)               
+    torch.cuda.manual_seed_all(seed)           
+    torch.backends.cudnn.deterministic = True  
+
+#%%
 setup_seed(42)
 
 torch.manual_seed(0)
@@ -22,6 +36,16 @@ df = pd.DataFrame(raw_data, columns = ['en', 'fr'])
 df_small = df[['en', 'fr']][:100]
 
 
+
+print(df_small.head())
+
+
+#%%
+eng = df_small['en']
+
+eng_list = [sentence for sentence in eng]
+
+model_input['input_ids'] #.unsqueeze(0)
 
 #%%
 
@@ -240,45 +264,8 @@ class DecoderLayer(nn.Module):
         
         return x
 
-### Define arguments ### (same as in "Attention is all you need")
-d_model = 512 # Dimension of embeddings
-d_k = 64 # dimension of keys (d_model / n_heads)
-d_ff = 2048
-vocab_size = len(df) # Number of (unique) words in dataset
-n_heads = 8 # Number of heads for MHA
-n_layers = 6 # Number of model layers
-train_iter = 5
-model_checkpoint = 't5-small'
-
-
-# Tokenizer
-
-
-
-# Function for mapping data from strings to tokens
-# s_key = source key, t_key = target_key
-
-
-ipt = preprocess_data(df_small, 'en', 'fr', max_length=36)
-
-
-
-src_vocab_size = [word for sentence in ipt['input_ids'] for word in sentence]
-src_vocab_size = len(np.unique(src_vocab_size))
-
-trg_vocab_size = [word for sentence in ipt['target'] for word in sentence]
-trg_vocab_size = len(np.unique(trg_vocab_size))
-
-# flat_list = [item for sublist in l for item in sublist]
-
-print((ipt['input_ids'].unsqueeze(1).shape))
-print((ipt['target'].unsqueeze(1).shape))
-
-
-
 def cloneLayers(module, n_layers):
     return nn.ModuleList([copy.deepcopy(module) for i in range(n_layers)])
-
 
 class Encoder(nn.Module):
     def __init__(self, vocab_size, d_model, d_ff, n_layers, n_heads, dropout=.1):
@@ -390,11 +377,28 @@ trg_vocab_size = len(np.unique(trg_vocab_size))
 
 
 #%%
-def generate_square_subsequent_mask(size):
+"""
+Note to self:
+    Adjust get_target_mask to find where padding occurs first and ignore 
+    everything that comes after that.
+    
+    --> I.e. find the i where trg[i] == 0 the first time and ignore i+1
+"""
+
+def get_target_mask(size, target):
     mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
+"""
+Find where padding starts in source.
+Generate mask such that everything is ignored after the first padding seen.
+
+"""
+def get_source_mask(size, source):
+    
+    
+    return mask
 
 source_all = ipt['input_ids']
 target_all = ipt['target']
@@ -403,11 +407,15 @@ target_all = ipt['target']
 src = source_all[0].unsqueeze(0)
 
 trg = target_all[0].unsqueeze(0)
-# print(src.size())
+
+size = trg.size(1)
+
+trg_mask = get_target_mask(size)
+
+
 #%%
 
 EMB = Embedder(vocab_size, d_model)
-
 pe = PositionalEncoder(d_model, max_seq_len=d_model)
 MHA = MultiHeadAttention(n_heads, d_model, d_k)
 FFN = FeedForwardNetwork(d_model, d_ff)
@@ -554,6 +562,54 @@ T = Transformer(vocab_size, vocab_size, d_model, n_layers, n_heads)
 
 preds = T.forward(ipt['input_ids'][0], ipt['target'][0], None, None)
 
+#%%
+def train_model(model_input, epochs, verbose=True):
+    model.train()
+    start = time.time()
+    total_loss = 0
+    
+    source_all = model_input['input_ids']
+    target_all = model_input['target']
+    
+    # loop over epochs
+    for epoch in range(epochs):
+        
+        # loop over all sentences
+        for i in range(len(source_all)):
+            
+            # unsqueeze to avoid dim mismatch between embedder and pe
+            src = torch.tensor(source_all[i].unsqueeze(1)) 
+            trg = torch.tensor(target_all[i].unsqueeze(1))
+            size = len(trg)
+            print("sizeeee", size)
+            
+            source_pad = source_all[i] == 0
+            
+            target_pad = target_all[i] == 0
+            
+            input_msk = (source_all[i] != source_pad).unsqueeze(1)
+            
+            # trg_ipt = trg[:, :-1]
+            # targets = trg[:, 1:].contiguous().view(-1)
+            
+            nopeak_mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
+            nopeak_mask = torch.autograd.Variable(torch.from_numpy(nopeak_mask) == 0)
+            
+            target_msk = (target_all[i] != target_pad).unsqueeze(1)
+            target_msk = target_msk & nopeak_mask
+            
+            print("getting preds...")
+            # preds = model.forward(src, trg , None, None)
+            preds = model.forward(src, trg, input_msk, target_msk)
+            print("preds gotten...")
+            optim.zero_grad()    
+            
+            loss = F.cross_entropy(preds.view(-1, preds.size(-1)), ignore_idx=target_pad)
+            loss.backward()
+            optim.step()
+            total_loss += loss.data[0]
+            if verbose:
+                print("time =",time.time()-start, "\n loss:", loss.data[0], "\n total loss:", total_loss)
 
 
 
@@ -570,7 +626,7 @@ print(f1.size())
 
 
 print(ipt['target'][1]==0)
-
+#%%
 # 
 # p_e1 = pe(e1)
 
@@ -590,7 +646,7 @@ print(ipt['target'][1]==0)
 
 # e1 = EMB.forward(e1['input_ids'])
 # p_e1 = pe(e1)
-
+#%%
 # def train_model(epochs, print_every=100):
     
 #     model.train()
@@ -637,7 +693,7 @@ print(ipt['target'][1]==0)
 #                 total_loss = 0
 #                 temp = time.time()
                 
-
+#%%
 
 
 
@@ -658,7 +714,7 @@ e2 = tokenizer(e2, return_tensors='pt')
 e1 = EMB.forward(e1['input_ids'])
 p_e1 = pe(e1)
 
-
+#%%
 # f1 = tokenizer(f1, return_tensors='pt')
 
 # print("embedding")
@@ -691,7 +747,7 @@ p_e1 = pe(e1)
 
 
 
-
+#%%
 
 """
 20 letters
