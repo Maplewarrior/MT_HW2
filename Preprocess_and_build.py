@@ -45,7 +45,7 @@ eng = df_small['en']
 
 eng_list = [sentence for sentence in eng]
 
-model_input['input_ids'] #.unsqueeze(0)
+# model_input['input_ids'] #.unsqueeze(0)
 
 #%%
 
@@ -57,14 +57,7 @@ class Embedder(nn.Module):
         self.embed = nn.Embedding(vocab_size, d_model)
         
     def forward(self, x):
-        setup_seed(42)
-        # print("Embedder in shape: \n", x.size())
-        out = self.embed(x)
-        # print("After embed shape:\n", out.size())
         return self.embed(x)
-    
-
-
 
 
 class PositionalEncoder(nn.Module):
@@ -92,10 +85,6 @@ class PositionalEncoder(nn.Module):
         x = x*np.sqrt(self.d_model)
         # Get sequence length
         seq_len = x.size(1)
-        print("seq_len:", seq_len)
-        v = torch.autograd.Variable(self.pe[:,:seq_len], 
-        requires_grad=False)
-        print("pe_shape:", v.size())
         x = x + torch.autograd.Variable(self.pe[:,:seq_len], 
         requires_grad=False)
         return x
@@ -104,14 +93,16 @@ class PositionalEncoder(nn.Module):
 def Attention(Q, K, V, d_k, mask=None, dropout=None):
     setup_seed(42)
 
-    
     vals = (Q @ K.transpose(-2,-1))/np.sqrt(d_k)
-    # apply softmax
-    softmax = nn.Softmax(dim=-1)
-    vals = softmax(vals)
     
     # Mask the scores if mask is specified. Model cannot see into future if masked.
-    vals = vals if mask is None else vals.masked_fill_(mask, 1e-4)
+    if mask is not None:
+        mask = mask.unsqueeze(1)
+        vals = vals.masked_fill(mask, 1e-5)
+    # vals = vals if mask is None else vals.masked_fill_(mask, 1e-4)
+    
+    softmax = nn.Softmax(dim=-1)
+    vals = softmax(vals)
     
     # apply dropout if specified
     vals = vals if dropout is None else dropout(vals)
@@ -143,8 +134,7 @@ class MultiHeadAttention(nn.Module):
     
     # Input = Matrix of dim [bs x seq_len x d_model]
     def split_heads(self, t):
-        # print("t size", t.size())
-        return t.reshape(t.size(0), -1, self.n_heads, self.d_k)
+        return t.reshape(t.size(0), -1, self.n_heads, int(self.d_k))
     # Output = Matrix of dim [bs x seq_len x n_heads x d_k]
     
     def forward(self, Q, K, V, mask = None):
@@ -201,17 +191,7 @@ class EncoderLayer(nn.Module):
         
         x2 = self.dropout2(self.FFN(x))
         x = x + self.norm2(x2)
-        
-        
-        # print("before norm", x.size())
-        # x2 = self.norm1(x) # norm
-        # print("after norm", x2.size())
-        # x = x + self.dropout1(self.MHA.forward(x2,x2,x2, mask)) #MHA
-        # print("after MHA", x.size())
-     
-        # x2 = self.norm2(x)
-        # x = self.dropout2(self.FFN.forward(x2))
-        
+    
         return x
     
 
@@ -237,19 +217,17 @@ class DecoderLayer(nn.Module):
         
         # self.linear = nn.Linear()
         
-    def forward(self, x, e_out, target_mask, source_mask):
+    def forward(self, x, e_out, source_mask, target_mask):
         setup_seed(42)
         
         # See "Attention is all you need" to follow code structure
-        
-        # part 1
+        ## part 1
         x2 = self.norm1(x) # Norm
         x = self.dropout1(self.MHA.forward(x2, x2, x2, target_mask)) # Masked MHA, target
         x = x2 + self.norm1(x) # Add & Norm
         
-        
         ## part 2
-        x3 = self.dropout2(self.MHA.forward(x, e_out, e_out)) # MHA on encoder output
+        x3 = self.dropout2(self.MHA.forward(x, e_out, e_out, source_mask)) # MHA on encoder output
         x2 = self.dropout2(self.MHA.forward(x, x, x)) #MHA continued in decoder
         x = self.norm2(x3) + self.norm2(x2) + self.norm2(x) # Add & Norm
         
@@ -258,38 +236,26 @@ class DecoderLayer(nn.Module):
         
         x = x + self.norm3(x2) # add
         # x = self.norm3(x) # norm (!!!CHECK IF THIS IS EQUIVALENT!!!)
-        
-        # x = self.linear(x) # DIMS???
-        # x = self.softmax(x) #IMPLEMENT??
-        
         return x
 
 def cloneLayers(module, n_layers):
     return nn.ModuleList([copy.deepcopy(module) for i in range(n_layers)])
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_size, d_model, d_ff, n_layers, n_heads, dropout=.1):
+    def __init__(self, vocab_size, d_model, d_ff, d_k, n_layers, n_heads, dropout=.1):
         super().__init__()
         self.n_layers = n_layers
         self.embedder = Embedder(vocab_size, d_model)
         self.pe = PositionalEncoder(d_model)
-        self.e_layers = cloneLayers(EncoderLayer(n_heads, d_model, d_ff, dropout), n_layers)
+        self.e_layers = cloneLayers(EncoderLayer(n_heads, d_model, d_ff, d_k), n_layers)
         self.norm = nn.LayerNorm(d_model)
         
     def forward(self, source, mask=None):
-        print("INPUTT", source.size())
         x = self.embedder.forward(source)
-        print("EMBEDD", x.size())
-        
-        print("PEE", self.pe.forward(x).size())
         x = self.pe.forward(x)
-        
-        
         for i in range(self.n_layers):
-            print(self.e_layers[i](x, mask))
             x = self.e_layers[i](x, mask)
         
-        print("Layers in Encoder:\n", x.size())
         return self.norm(x)
 
 class Decoder(nn.Module):
@@ -301,8 +267,8 @@ class Decoder(nn.Module):
         self.d_layers = cloneLayers(DecoderLayer(n_heads, d_model, d_ff, d_k), n_layers)
         self.norm = nn.LayerNorm(d_model)
     
-    def forward(self, source, e_out, source_mask, target_mask):
-        x = self.embedder.forward(source)
+    def forward(self, trg, e_out, source_mask, target_mask):
+        x = self.embedder.forward(trg)
         x = self.pe.forward(x)
         
         for i in range(self.n_layers):
@@ -313,16 +279,15 @@ class Decoder(nn.Module):
     
     
 class Transformer(nn.Module):
-    def __init__(self, source_vocab_size, target_vocab_size, d_model, n_layers, n_heads):
+    def __init__(self, source_vocab_size, target_vocab_size, d_model,d_ff, d_k, n_layers, n_heads):
         super().__init__()
-        self.e = Encoder(source_vocab_size, d_model,d_ff, n_layers, n_heads)
+        self.e = Encoder(source_vocab_size, d_model,d_ff, d_k, n_layers, n_heads)
         self.d = Decoder(target_vocab_size, d_model,d_ff, d_k, n_layers, n_heads)
-        
         self.linear_f = nn.Linear(d_model, target_vocab_size)
         
     def forward(self, source, target, source_mask, target_mask):
-        e_out = self.e(source, source_mask)
-        d_out = self.d(target, e_out, source_mask, target_mask)
+        e_out = self.e.forward(source, source_mask)
+        d_out = self.d.forward(target, e_out, source_mask, target_mask)
         
         out = self.linear_f(d_out)
         return out
@@ -342,8 +307,7 @@ model_checkpoint = 't5-small'
 
 
 # Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=d_model)
-
+tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=vocab_size)
 
 
 # Function for mapping data from strings to tokens
@@ -372,11 +336,11 @@ src_vocab_size = len(np.unique(src_vocab_size))
 trg_vocab_size = [word for sentence in ipt['target'] for word in sentence]
 trg_vocab_size = len(np.unique(trg_vocab_size))
 
-# flat_list = [item for sublist in l for item in sublist]
 
 
 
-#%%
+
+
 """
 Note to self:
     Adjust get_target_mask to find where padding occurs first and ignore 
@@ -387,380 +351,109 @@ Note to self:
 
 def get_target_mask(size, target):
     mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
-    mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-    return mask
+    mask = mask.float().masked_fill(mask == 0, float(0)).masked_fill(mask == 1, float(1))
+    
+    # Find out where the target pad starts
+    trg_pad = (target==0).nonzero()
+    
+    # Check if there is no padding in sentence
+    if len(trg_pad) == 0:
+        stop_idx = size
+        
+    
+    else:
+        stop_idx = trg_pad[0][1].item()
+        mask[stop_idx:, :] = -69
+    
+    
+    return mask.unsqueeze(0) > 0, stop_idx
 
 """
-Find where padding starts in source.
-Generate mask such that everything is ignored after the first padding seen.
-
+Functionality:
+    Find where padding starts in source.
+    Generate mask such that everything is ignored after the first padding seen.
 """
 def get_source_mask(size, source):
+    src_pad = (source==0).nonzero()
     
+    if len(src_pad == 0):
+        stop_idx = size
+        
+    else:
+        stop_idx = src_pad[0][1].item()
+    
+    mask = source.clone()
+    # Mask all padding with -inf
+    mask[:, stop_idx:] = 0
+    # Convert everything before stop_idx to zero
+    mask[:,:stop_idx] = 1
+    
+    mask = mask.unsqueeze(0) > 0
     
     return mask
 
-source_all = ipt['input_ids']
-target_all = ipt['target']
-
-
-src = source_all[0].unsqueeze(0)
-
-trg = target_all[0].unsqueeze(0)
-
-size = trg.size(1)
-
-trg_mask = get_target_mask(size)
-
-
-#%%
-
-EMB = Embedder(vocab_size, d_model)
-pe = PositionalEncoder(d_model, max_seq_len=d_model)
-MHA = MultiHeadAttention(n_heads, d_model, d_k)
-FFN = FeedForwardNetwork(d_model, d_ff)
-
-encoderLayer = EncoderLayer(n_heads, d_model, d_ff, d_k)
-# encoderLayer2 = EncoderLayer1(n_heads, d_model, d_ff)
-
-decoderLayer1 = DecoderLayer(n_heads, d_model, d_ff, d_k)
-
-encoder = Encoder(vocab_size, d_model,d_ff, n_layers, n_heads)
-
-setup_seed(42)
 
 
 
+model = Transformer(vocab_size, vocab_size, d_model, d_ff, d_k, n_layers, n_heads)
 
-#%%
-
-sent1 = df_small['en'][0]
-print(sent1)
-
-e1 = ipt['input_ids'][0].unsqueeze(0)
-f1 = ipt['target'][0].unsqueeze(0)
-print(e1)
-print("before embed", e1.size())
-e1 = EMB.forward(e1)
-f1 = EMB.forward(f1)
-print("after embed", e1.size())
-
-e1 = pe.forward(e1)
-f1 = pe.forward(f1)
-print("positional encode \n", e1.size())
-
-
-Q, K, V = e1, e1, e1
-
-print("performing MHA on source")
-out = MHA.forward(Q, K, V)
-print("out shape:", out.size())
-
-
-out = FFN.forward(out)
-print("FFN:\n", out.size())
-out_e1 = encoderLayer(out)
-
-print("encoderLayer out:\n",out_e1.size())
-
-
-
-# out_d1 = decoderLayer1.forward(f1, out_e1, None, None)
-
-
-
-
-
-
-#%%
-print("method 1:")
-print((ipt['input_ids'].unsqueeze(1).shape))
-print((ipt['target'].unsqueeze(1).shape))
-
-
-print(ipt['input_ids'].unsqueeze(1)[0].shape)
-print("method2:")
-
-
-# print("##### Example shown here #####")
-EMB = Embedder(vocab_size, d_model)
-pe = PositionalEncoder(d_model, max_seq_len=36)
-
-e1 = df_small['en'][0]
-f1 = df_small['fr'][0]
-
-
-e1 = tokenizer(e1, truncation=True, padding=True, return_tensors='pt')
-f1 = tokenizer(f1, truncation=True, padding=True, return_tensors='pt')
-
-print("before embed:\n", e1['input_ids'].shape)
-
-e1 = EMB.forward(e1['input_ids'])
-print("after embed:\n", e1.size())
-f1 = EMB.forward(f1['input_ids'])
-
-
-print(f1.size())
-
-p_e1 = pe(e1)
-
-
-
-
-
-
-pe = PositionalEncoder(d_model, max_seq_len=d_model)
-MHA = MultiHeadAttention(n_heads, d_model, d_k)
-FFN = FeedForwardNetwork(d_model, d_ff)
-
-encoderLayer = EncoderLayer(n_heads, d_model, d_ff, d_k)
-# encoderLayer2 = EncoderLayer1(n_heads, d_model, d_ff)
-
-decoderLayer1 = DecoderLayer(n_heads, d_model, d_ff, d_k)
-
-encoder = Encoder(vocab_size, d_model,d_ff, n_layers, n_heads)
-
-setup_seed(42)
-
-
-### define model and initialize params ###
-model = Transformer(vocab_size, vocab_size, d_model, n_layers, n_heads)
 for p in model.parameters():
     if p.dim() > 1:
         nn.init.xavier_uniform_(p)
-
-### define optimizer ###
+        
 optim = torch.optim.Adam(model.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
 
+# Test for a single sentence
+# out = model.forward(en1, trg_input, en1_msk, fr1_msk)
 
-epochs = 5
-batch_size = 10
-
-# src = ipt['input_ids']
-# trg = ipt['target']
-
-# def batch(ipt, n=5):
-#     l = len(ipt)
-#     for ndx in range(0, l, n):
-#         yield ipt[ndx:min(ndx + n, l)]
-
-
-def get_mask(trg, trg_mask):
-    return torch.masked_select(trg, trg_mask)
-
-# target_seq = trg[0]
-# size = len(target_seq)
-
-# nopeak_mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
-# nopeak_mask = torch.autograd.Variable(torch.from_numpy(nopeak_mask) == 0)
-
+# loss = F.cross_entropy(out.view(-1, out.size(-1)), y)
 
 #%%
-# for epoch in range(epochs):
-    
-T = Transformer(vocab_size, vocab_size, d_model, n_layers, n_heads)
-
-preds = T.forward(ipt['input_ids'][0], ipt['target'][0], None, None)
-
-#%%
-def train_model(model_input, epochs, verbose=True):
+print_every = 10
+def train_model(model, data, epochs, verbose=False):
     model.train()
     start = time.time()
     total_loss = 0
     
-    source_all = model_input['input_ids']
-    target_all = model_input['target']
+    source_all = data['input_ids']
+    target_all = data['target']
     
     # loop over epochs
     for epoch in range(epochs):
-        
+        print("epoch", epoch+1)
         # loop over all sentences
         for i in range(len(source_all)):
+            if i % print_every == 0:
+                print("sentece", i+1)
             
             # unsqueeze to avoid dim mismatch between embedder and pe
-            src = torch.tensor(source_all[i].unsqueeze(1)) 
-            trg = torch.tensor(target_all[i].unsqueeze(1))
-            size = len(trg)
-            print("sizeeee", size)
+            src = source_all[i].unsqueeze(0) 
+            trg = target_all[i].unsqueeze(0)
             
-            source_pad = source_all[i] == 0
+            # target input, remove last word
+            trg_input = trg[:, :-1]
             
-            target_pad = target_all[i] == 0
+            # get targets
+            y = trg[:, 1:].contiguous().view(-1)
             
-            input_msk = (source_all[i] != source_pad).unsqueeze(1)
+            src_mask = get_source_mask(src.size(1), src)
+            trg_mask, trg_stop_idx = get_target_mask(trg_input.size(1), trg_input)
             
-            # trg_ipt = trg[:, :-1]
-            # targets = trg[:, 1:].contiguous().view(-1)
-            
-            nopeak_mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
-            nopeak_mask = torch.autograd.Variable(torch.from_numpy(nopeak_mask) == 0)
-            
-            target_msk = (target_all[i] != target_pad).unsqueeze(1)
-            target_msk = target_msk & nopeak_mask
-            
-            print("getting preds...")
-            # preds = model.forward(src, trg , None, None)
-            preds = model.forward(src, trg, input_msk, target_msk)
-            print("preds gotten...")
+            preds = model.forward(src, trg_input, src_mask, trg_mask)
             optim.zero_grad()    
-            
-            loss = F.cross_entropy(preds.view(-1, preds.size(-1)), ignore_idx=target_pad)
+            loss = F.cross_entropy(preds.view(-1, preds.size(-1)), y)
             loss.backward()
             optim.step()
-            total_loss += loss.data[0]
-            if verbose:
-                print("time =",time.time()-start, "\n loss:", loss.data[0], "\n total loss:", total_loss)
-
-
-
-train_model(ipt, epochs)             
-#%%
-EMB = Embedder(vocab_size, d_model)
-e1 = EMB(ipt['input_ids'][0].unsqueeze(1))
-f1 = EMB(ipt['target'][0].unsqueeze(1))
-
-
-
-print(e1.size())
-print(f1.size())
-
-
-print(ipt['target'][1]==0)
-#%%
-# 
-# p_e1 = pe(e1)
-
-
-# print("##### Example shown here #####")
-# EMB = Embedder(vocab_size, d_model)
-
-# e1 = df_small['en'][0]
-# e2 = df_small['en'][2]
-# f1 = df_small['fr'][0]
-
-# e = tokenizer(e1, return_tensors='pt')
-# e1 = tokenizer(e1, return_tensors='pt')
-# e2 = tokenizer(e2, return_tensors='pt')
-
-# # print(e1)
-
-# e1 = EMB.forward(e1['input_ids'])
-# p_e1 = pe(e1)
-#%%
-# def train_model(epochs, print_every=100):
-    
-#     model.train()
-    
-#     start = time.time()
-#     temp = start
-    
-#     total_loss = 0
-    
-#     for epoch in range(epochs):
-       
-#         for i, batch in enumerate(train_iter):
-#             src = batch.English.transpose(0,1)
-#             trg = batch.French.transpose(0,1)
-#             # the French sentence we input has all words except
-#             # the last, as it is using each word to predict the next
+            total_loss += loss.item()
             
-#             trg_input = trg[:, :-1]
-            
-#             # the words we are trying to predict
-            
-#             targets = trg[:, 1:].contiguous().view(-1)
-            
-#             # create function to make masks using mask code above
-            
-#             src_mask, trg_mask = create_masks(src, trg_input)
-            
-#             preds = model(src, trg_input, src_mask, trg_mask)
-            
-#             optim.zero_grad()
-            
-#             loss = F.cross_entropy(preds.view(-1, preds.size(-1)),
-#             results, ignore_index=target_pad)
-#             loss.backward()
-#             optim.step()
-            
-#             total_loss += loss.data[0]
-#             if (i + 1) % print_every == 0:
-#                 loss_avg = total_loss / print_every
-#                 print("time = %dm, epoch %d, iter = %d, loss = %.3f,%ds per %d iters" 
-#                       % ((time.time() - start) // 60,
-#                 epoch + 1, i + 1, loss_avg, time.time() - temp,
-#                 print_every))
-#                 total_loss = 0
-#                 temp = time.time()
+            if i % print_every ==0:
                 
-#%%
-
-
-
-
-print("##### Example shown here #####")
-EMB = Embedder(vocab_size, d_model)
-
-e1 = df_small['en'][0]
-e2 = df_small['en'][2]
-f1 = df_small['fr'][0]
-
-e = tokenizer(e1, return_tensors='pt')
-e1 = tokenizer(e1, return_tensors='pt')
-e2 = tokenizer(e2, return_tensors='pt')
-
-# print(e1)
-
-e1 = EMB.forward(e1['input_ids'])
-p_e1 = pe(e1)
+                if verbose:
+                    print("time:",np.round(time.time()-start, 2), "\n loss:", loss.item(), "\n total loss:", total_loss)
 
 #%%
-# f1 = tokenizer(f1, return_tensors='pt')
-
-# print("embedding")
-# # e1 = EMB.forward(e1['input_ids'])
-# e2 = EMB.forward(e2['input_ids'])
-# f1 = EMB.forward(f1['input_ids'])
-
-# print("f1:", f1.size())
-# out_e = encoder.forward(e['input_ids'])
-# #%%
-
-# print("positional encoding")
-# # print(e1.size())
-
-# e1 = pe.forward(e1)
-# Q, K, V = e1, e1, e1
-
-# out = MHA.forward(Q, K, V)
-
-# out = FFN.forward(out)
-
-# out_e1 = encoderLayer(out)
-# print("encoderLayer out:\n",out_e1.size())
+epochs = 1
+train_model(model, ipt, epochs, True)             
 
 
-
-# out_d1 = decoderLayer1.forward(f1, out_e1, None, None)
-
-
-
-
-
-#%%
-
-"""
-20 letters
-
-how many combinations of 20 characters with length 20 are possible?
-
-abc 
-acb
-cba 
-cab
-bac
-bca
-
-
-"""
 
