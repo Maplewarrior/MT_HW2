@@ -66,18 +66,5 @@ batch_size = 10
 
 preds = model.forward(ipt['input_ids'][0], ipt['target'][0], None, None)
 
-"""
-20 letters
 
-how many combinations of 20 characters with length 20 are possible?
-
-abc 
-acb
-cba 
-cab
-bac
-bca
-
-
-"""
 
