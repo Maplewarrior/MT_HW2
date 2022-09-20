@@ -322,7 +322,7 @@ model_checkpoint = 't5-small'
 
 
 # Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=512)
+tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, model_max_length=1024)
 
 
 # Function for mapping data from strings to tokens
@@ -341,7 +341,8 @@ def preprocess_data(df, s_key, t_key, max_length):
     
     return model_input
 
-ipt = preprocess_data(df, 'en', 'fr', max_length=36)
+# max length refers to maximum sentence length
+data = preprocess_data(df, 'en', 'fr', max_length=80)
 
 
 
@@ -475,6 +476,7 @@ def train_model(model, data, epochs, verbose=False):
             loss_list.append(loss.item())
             
             if verbose and i % print_every == 0:
+                
                 print("time:",np.round(time.time()-start, 2), "\n loss:", np.round(loss.item(),2), "\n total loss:", np.round(total_loss,2)) 
     
     return loss_list
